@@ -1,6 +1,6 @@
 import vscode from 'vscode';
 import { SecretsManager } from './SecretsManager';
-import { registerAll } from './registry';
+import { registerAll, AuthError } from './registry';
 import type { RegistrationResult } from './registry';
 
 let current: RegistrationResult | undefined;
@@ -52,8 +52,21 @@ async function doRegister(
   try {
     current = await registerAll(context, secrets);
   } catch (err) {
-    console.error('[ORCP] Registration failed:', err);
-    vscode.window.showErrorMessage(`ORCP: Failed to initialize. ${String(err)}`);
+    if (err instanceof AuthError) {
+      const label = err.reason === 'no-key'
+        ? 'ORCP: No API key configured. Models will not appear in the picker.'
+        : 'ORCP: API key rejected (401 Unauthorized). Update your key to reload models.';
+      const choice = await vscode.window.showErrorMessage(label, 'Set API Key');
+      if (choice === 'Set API Key') {
+        const saved = await secrets.promptAndSave();
+        if (saved) {
+          await doRegister(context, secrets);
+        }
+      }
+    } else {
+      console.error('[ORCP] Registration failed:', err);
+      vscode.window.showErrorMessage(`ORCP: Failed to initialize. ${String(err)}`);
+    }
   }
 }
 

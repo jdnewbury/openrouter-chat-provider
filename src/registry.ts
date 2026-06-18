@@ -6,6 +6,13 @@ import { SessionTracker } from './SessionTracker';
 import { ChatProvider } from './ChatProvider';
 import { ModelConfig } from './types';
 
+export class AuthError extends Error {
+  constructor(public readonly reason: 'no-key' | 'invalid-key') {
+    super(reason === 'no-key' ? 'No API key configured.' : 'API key rejected (401 Unauthorized).');
+    this.name = 'AuthError';
+  }
+}
+
 export interface RegistrationResult extends vscode.Disposable {
   readonly tracker: SessionTracker;
 }
@@ -27,14 +34,17 @@ export async function registerAll(
     const rawModels = await client.listModels();
     registry.rebuild(rawModels, modelConfigs);
   } catch (err) {
-    if (err instanceof Error && err.message.includes('API key')) {
-      const choice = await vscode.window.showErrorMessage(
-        'ORCP: No API key configured. Models will not appear in the picker.',
-        'Set API Key',
-      );
-      if (choice === 'Set API Key') {
-        await secrets.promptAndSave();
-      }
+    const msg = err instanceof Error ? err.message : String(err);
+    const isNoKey = msg.includes('API key');
+    const isUnauthorized =
+      (err instanceof Error && err.constructor.name.includes('Unauthorized')) ||
+      msg.includes('401') ||
+      msg.includes('Unauthorized');
+
+    if (isNoKey) {
+      throw new AuthError('no-key');
+    } else if (isUnauthorized) {
+      throw new AuthError('invalid-key');
     } else {
       vscode.window.showErrorMessage(`ORCP: Failed to load models. ${String(err)}`);
     }
